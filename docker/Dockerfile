@@ -18,7 +18,7 @@
 
 # First stage: the build environment
 # Edge required for rocksdb
-FROM alpine:3.8 AS builder
+FROM alpine:3.9 AS builder
 MAINTAINER Apache NiFi <dev@nifi.apache.org>
 
 ARG UID
@@ -29,6 +29,7 @@ ARG MINIFI_SOURCE_CODE
 # Install the system dependencies needed for a build
 RUN apk --update --no-cache upgrade && apk --update --no-cache add gcc \
 	g++ \
+	bash \
 	make \
 	bison \
 	flex \
@@ -44,22 +45,23 @@ RUN apk --update --no-cache upgrade && apk --update --no-cache add gcc \
 	git \
 	unzip \
 	gpsd-dev \
-	libressl-dev \
+	openssl-dev \
 	zlib-dev \
 	bzip2-dev \
-	python-dev
+	python-dev \
+	libpcap-dev \
+	libarchive-dev \
+	xz-dev \
+	nettle-dev
 
 ENV USER minificpp
 ENV MINIFI_BASE_DIR /opt/minifi
 
 # Setup minificpp user
-RUN addgroup -g $GID $USER && adduser -u $UID -D -G $USER -g "" $USER
+#RUN addgroup -g $GID $USER && adduser -u $UID -D -G $USER -g "" $USER
 RUN mkdir -p $MINIFI_BASE_DIR 
 
 ADD $MINIFI_SOURCE_CODE $MINIFI_BASE_DIR
-RUN chown -R $USER:$USER $MINIFI_BASE_DIR
-
-USER $USER
 
 ENV MINIFI_HOME $MINIFI_BASE_DIR/nifi-minifi-cpp-$MINIFI_VERSION
 
@@ -67,30 +69,36 @@ ENV MINIFI_HOME $MINIFI_BASE_DIR/nifi-minifi-cpp-$MINIFI_VERSION
 RUN cd $MINIFI_BASE_DIR \
 	&& mkdir build \
 	&& cd build \
-	&& cmake -DSKIP_TESTS=true .. \
+	&& cmake -DENABLE_PCAP=true -DSKIP_TESTS=true -DENABLE_PYTHON=OFF -DENABLE_OPS=OFF -DDISABLE_ROCKSDB=true .. \
+	&& ln -s /usr/include/linux/sysctl.h /usr/include/sys/sysctl.h \
+	&& ( cd extensions/pcap/pcap\+\+/ && bash configure-linux.sh --default ) \
 	&& make -j8 package \
-	&& tar -xzvf $MINIFI_BASE_DIR/build/nifi-minifi-cpp-$MINIFI_VERSION-bin.tar.gz -C $MINIFI_BASE_DIR
+	&& tar -xzvf $MINIFI_BASE_DIR/build/nifi-minifi-cpp-*-bin.tar.gz -C $MINIFI_BASE_DIR
+
+#RUN chown -R $USER:$USER $MINIFI_BASE_DIR
+
 
 # Second stage: the runtime image
 # Edge required for rocksdb
-FROM alpine:3.8
+FROM alpine:3.9
 
 ARG UID
 ARG GID
 ARG MINIFI_VERSION
 ARG MINIFI_SOURCE_CODE
 
-# Add testing repo for rocksdb
-RUN echo 'http://dl-cdn.alpinelinux.org/alpine/edge/testing' >> /etc/apk/repositories
-
 RUN apk --update --no-cache upgrade && apk add --update --no-cache \
 	util-linux \
 	curl \
 	unzip \
 	gpsd \
-	libressl \
+	libssl1.1 \
+	libpcap \
 	python \
-	zlib
+	zlib \
+	libarchive \
+	xz-libs \
+	nettle
 
 # Start MiNiFi CPP in the foreground
 ENV USER minificpp
